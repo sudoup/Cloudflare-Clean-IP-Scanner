@@ -1,0 +1,94 @@
+name: Build CloudflareScanner
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: windows
+            goarch: amd64
+            ext: .exe
+          - goos: windows
+            goarch: arm64
+            ext: .exe
+          - goos: linux
+            goarch: amd64
+            ext: ""
+          - goos: linux
+            goarch: arm64
+            ext: ""
+          - goos: linux
+            goarch: arm
+            goarm: "7"
+            ext: ""
+          - goos: darwin
+            goarch: amd64
+            ext: ""
+          - goos: darwin
+            goarch: arm64
+            ext: ""
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Set build vars
+        run: |
+          VERSION=$(date +%Y.%m.%d-%H%M%S)-${GITHUB_SHA::7}
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          if [ "${{ matrix.goarm }}" != "" ]; then
+            PLATFORM="${{ matrix.goos }}-${{ matrix.goarch }}v${{ matrix.goarm }}"
+          else
+            PLATFORM="${{ matrix.goos }}-${{ matrix.goarch }}"
+          fi
+          echo "PLATFORM=$PLATFORM" >> $GITHUB_ENV
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
+          CGO_ENABLED: 0
+        run: |
+          BINARY="CloudflareScanner${{ matrix.ext }}"
+          go build -trimpath -ldflags "-s -w -X main.version=${{ env.VERSION }}" -o "$BINARY" .
+          
+          mkdir -p "build/${{ env.PLATFORM }}"
+          mv "$BINARY" "build/${{ env.PLATFORM }}/"
+          cp ip.txt ipv6.txt README.md LICENSE "build/${{ env.PLATFORM }}/"
+          
+          cd "build/${{ env.PLATFORM }}"
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            zip -r "../CloudflareScanner-${{ env.PLATFORM }}.zip" .
+          else
+            tar -czf "../CloudflareScanner-${{ env.PLATFORM }}.tar.gz" .
+          fi
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: CloudflareScanner-${{ env.PLATFORM }}
+          path: build/${{ env.PLATFORM }}/
+          retention-days: 30
+
+      - name: Upload Archives
+        uses: actions/upload-artifact@v4
+        with:
+          name: CloudflareScanner-${{ env.PLATFORM }}-archive
+          path: |
+            build/CloudflareScanner-${{ env.PLATFORM }}.zip
+            build/CloudflareScanner-${{ env.PLATFORM }}.tar.gz
+          retention-days: 30
